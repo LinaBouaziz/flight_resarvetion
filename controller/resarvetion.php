@@ -1,164 +1,140 @@
-
-
 <?php
+require_once 'models/Reservation.php';
 
-echo realpath('../confi/db.php');
-require_once __DIR__ . '/../confi/db.php';
-require_once __DIR__ . '/../Model/reservtion.php';
-require_once __DIR__ . '/../Model/flight.php';
+class ReservationController {
+    private $reservationModel;
 
-// بدء الجلسة بشكل آمن
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+    public function __construct($pdo) {
+        $this->reservationModel = new Reservation($pdo);
+    }
 
-// التحقق من تسجيل دخول العميل فقط إذا لم يكن المستخدم Admin
-if (!isset($_SESSION['client_id']) && (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true)) {
-    header("Location: ../View/client/login.php");
-    exit;
-}
+    // إضافة حجز جديد مع المسافرين والدفع
+    public function add() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $reservationData = [
+                'reservation_date' => $_POST['reservation_date'],
+                'status' => $_POST['status'],
+                'class_name' => $_POST['class_name'],
+                'client_id' => $_POST['client_id'],
+                'flight_number' => $_POST['flight_number'],
+                'total_price' => $_POST['total_price']
+            ];
 
-$reservationModel = new Reservation($pdo);
-$flightModel = new Flight($pdo);
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    
-    if ($_POST['action'] === 'addReservation') {
-        
-        $flightNumber = $_POST['flight_number'];
-        $class = $_POST['class_name'];
-        $passengerCount = count($_POST['first_name']);
-
-        // جلب معلومات الرحلة
-        $flight = $flightModel->getFlightByNumber($flightNumber);
-
-        // تحديد السعر حسب الكلاس
-        switch ($class) {
-            case 'Economy':
-                $unitPrice = $flight['economy_price'];
-                break;
-            case 'Business':
-                $unitPrice = $flight['business_price'];
-                break;
-            case 'First Class':
-                $unitPrice = $flight['first_class_price'];
-                break;
-            default:
-                $unitPrice = 0;
-        }
-
-        // حساب السعر الإجمالي
-        $totalPrice = $unitPrice * $passengerCount;
-
-        // تجهيز بيانات الحجز
-        $reservationDate = date('Y-m-d H:i:s');
-        $reservationData = [
-            'reservation_date' => $reservationDate,
-            'status' => 'Pending',
-            'class_name' => $class,
-            'client_id' => $_SESSION['client_id'],
-            'flight_number' => $flightNumber,
-            'total_price' => $totalPrice
-        ];
-
-        // تنفيذ الحجز
-        $reservationNumber = $reservationModel->addReservation($reservationData);
-
-        if ($reservationNumber) {
-            $passengers = [];
-            for ($i = 0; $i < $passengerCount; $i++) {
-                $passengers[] = [
-                    'first_name' => $_POST['first_name'][$i],
-                    'last_name' => $_POST['last_name'][$i],
-                    'email' => $_POST['email'][$i],
-                    'phone' => $_POST['phone'][$i],
-                ];
+            // إضافة الحجز
+            $reservationNumber = $this->reservationModel->addReservation($reservationData);
+            if (!$reservationNumber) {
+                die('حدث خطأ أثناء إضافة الحجز.');
             }
 
-            $allPassengersAdded = true;
-
-            foreach ($passengers as $passenger) {
-                $passengerData = [
-                    'reservation_number' => $reservationNumber,
-                    'first_name' => $passenger['first_name'],
-                    'last_name' => $passenger['last_name'],
-                    'email' => $passenger['email'],
-                    'phone' => $passenger['phone']
-                ];
-            
-                if (!$reservationModel->addPassenger($passengerData)) {
-                    $allPassengersAdded = false;
-                    break;
+            // إضافة المسافرين
+            if (isset($_POST['passengers']) && is_array($_POST['passengers'])) {
+                foreach ($_POST['passengers'] as $passenger) {
+                    $passenger['reservation_number'] = $reservationNumber;
+                    $this->reservationModel->addPassenger($passenger);
                 }
             }
-            
-            if ($allPassengersAdded) {
-                $_SESSION['reservation_number'] = $reservationNumber;
-                header("Location: ../View/resarvetion/paymentpage.php");
+
+            // إضافة الدفع
+            $paymentData = [
+                'reservation_number' => $reservationNumber,
+                'card_name' => $_POST['card_name'],
+                'card_number' => $_POST['card_number'],
+                'expiry_date' => $_POST['expiry_date'],
+                'cvv' => $_POST['cvv'],
+                'created_at' => date('Y-m-d H:i:s')
+            ];
+            $this->reservationModel->addPayment($paymentData);
+
+            header("Location: booking-confirmed.php?reservation_number=" . $reservationNumber);
+            exit;
+        }
+        include 'views/reservation_add.php';
+    }
+
+    // عرض جميع الحجوزات
+    public function list() {
+        $reservations = $this->reservationModel->getAllReservations();
+        include 'views/reservation_list.php';
+    }
+
+    // تعديل حالة الحجز فقط
+    public function updateStatus() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $reservationNumber = $_POST['reservation_number'];
+            $status = $_POST['status'];
+
+            $success = $this->reservationModel->updateReservationStatus($reservationNumber, $status);
+            if ($success) {
+                header("Location: reservations.php?message=تم تحديث الحالة بنجاح");
                 exit;
             } else {
-                $reservationModel->updateReservationStatus($reservationNumber, 'Cancelled');
-                $_SESSION['error'] = "حدث خطأ أثناء إضافة بيانات المسافرين.";
-                header("Location: ../View/resarvetion/booking.php");
-                exit;
+                die("فشل تحديث حالة الحجز");
             }
         }
     }
 
-    // معالجة الدفع
-    if ($_POST['action'] === 'addPayment') {
-        if (!isset($_SESSION['reservation_number'])) {
-            $_SESSION['error'] = "رقم الحجز غير موجود في الجلسة. تأكد من أنك أتممت الحجز أولاً";
-            header("Location: ../View/resarvetion/booking.php");
-            exit;
-        }
+    // تعديل بيانات الحجز بشكل عام
+    public function update() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $reservationNumber = $_POST['reservation_number'];
+            $data = [
+                'status' => $_POST['status'],
+                'class_name' => $_POST['class_name'],
+                'total_price' => $_POST['total_price']
+            ];
 
-        $paymentData = [
-            'reservation_number' => $_SESSION['reservation_number'],
-            'card_name' => $_POST['card_name'],
-            'card_number' => $_POST['card_number'],
-            'expiry_date' => $_POST['expiry_date'],
-            'cvv' => $_POST['cvv'],
-            'created_at' => date('Y-m-d H:i:s')
-        ];
-
-        if ($reservationModel->addPayment($paymentData)) {
-            if ($reservationModel->updateReservationStatus($_SESSION['reservation_number'], 'Paid')) {
-                header("Location: ../View/resarvetion/book_confirmide.php");
+            $success = $this->reservationModel->updateReservation($reservationNumber, $data);
+            if ($success) {
+                header("Location: reservations.php?message=تم تحديث الحجز بنجاح");
                 exit;
             } else {
-                $_SESSION['error'] = "حدث خطأ أثناء تحديث حالة الحجز";
-                header("Location: ../View/resarvetion/paymentpage.php");
+                die("فشل تحديث الحجز");
+            }
+        }
+    }
+
+    // عرض نموذج تعديل الحجز ومعالجة التحديث
+    public function edit() {
+        if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['reservation_number'])) {
+            $reservationNumber = $_GET['reservation_number'];
+            $reservation = $this->reservationModel->getReservationById($reservationNumber);
+
+            if ($reservation) {
+                include 'views/reservation_edit.php';
+            } else {
+                die("الحجز غير موجود");
+            }
+        } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
+            $reservationNumber = $_POST['reservation_number'];
+            $status = $_POST['status'];
+            $departureTime = $_POST['departure_time'];
+
+            $success = $this->reservationModel->updateReservationFields($reservationNumber, $status, $departureTime);
+            if ($success) {
+                header("Location: reservations.php?message=تم تعديل الحجز بنجاح");
                 exit;
+            } else {
+                die("فشل تعديل الحجز");
             }
         } else {
-            $_SESSION['error'] = "حدث خطأ أثناء معالجة الدفع";
-            header("Location: ../View/resarvetion/paymentpage.php");
-            exit;
+            die("طلب غير صالح");
         }
     }
-} // ← ✅ إغلاق القوس المفقود
 
+    // حذف الحجز
+    public function delete() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_number'])) {
+            $reservationNumber = $_POST['reservation_number'];
 
-
-// ✅ الآن نبدأ بكود المشرف
-if (isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true) {
-    
-    $reservationModel = new Reservation($pdo);
-
-    // عند طلب عرض جميع الحجوزات
-    if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'list') {
-        $reservations = $reservationModel->getAllReservations();
-
-        require_once '../../View/admin/managereservations.php';
-        exit;
+            $success = $this->reservationModel->deleteReservation($reservationNumber);
+            if ($success) {
+                header("Location: reservations.php?message=تم حذف الحجز بنجاح");
+                exit;
+            } else {
+                die("فشل حذف الحجز");
+            }
+        } else {
+            die("رقم الحجز غير محدد");
+        }
     }
-
-    // يمكنك هنا لاحقًا إضافة: تعديل حالة، حذف حجز...
 }
-
-// ✅ هذا السطر يجب أن يكون في النهاية فقط:
-$_SESSION['error'] = "طلب غير صحيح";
-header("Location: ../View/resarvetion/booking.php");
-exit;
-

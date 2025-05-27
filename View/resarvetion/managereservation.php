@@ -1,3 +1,5 @@
+
+
  <!<?php
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -7,7 +9,7 @@ error_reporting(E_ALL);
 require_once '../../controller/resarvetion.php';
 ?>
 
- --><!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -248,14 +250,17 @@ require_once '../../controller/resarvetion.php';
     <?php foreach ($reservations as $res): ?>
       <tr>
         <td>#<?= htmlspecialchars($res['reservation_number']) ?></td>
-        <td><?= htmlspecialchars($res['client_id']) ?></td> <!-- لاحقًا سنربط client name -->
+        <td><?= htmlspecialchars($res['customer_name']) ?></td>
         <td><?= htmlspecialchars($res['flight_number']) ?></td>
         <td><?= htmlspecialchars($res['reservation_date']) ?></td>
-        <td><?= htmlspecialchars($res['class_name']) ?></td>
-        <td><?= htmlspecialchars($res['STATUS']) ?></td>
+        <td><?= htmlspecialchars($res['departure_time']) ?></td>
+        <td><?= htmlspecialchars($res['status']) ?></td>
         <td class="action-btns">
-          <button class="btn-edit" onclick="editReservation('<?= $res['id'] ?>')">Edit</button>
-          <button class="btn-cancel">Cancel</button>
+          <button class="btn-edit" onclick="editReservation('<?= htmlspecialchars($res['reservation_number']) ?>')">Edit</button>
+          <form method="POST" action="reservations.php?action=delete" style="display:inline;">
+            <input type="hidden" name="reservation_number" value="<?= htmlspecialchars($res['reservation_number']) ?>">
+            <button type="submit" class="btn-cancel" onclick="return confirm('هل أنت متأكد من حذف هذا الحجز؟');">Delete</button>
+          </form>
         </td>
       </tr>
     <?php endforeach; ?>
@@ -264,12 +269,14 @@ require_once '../../controller/resarvetion.php';
   <?php endif; ?>
 </tbody>
 
+
     </table>
   </main>
 
   <script>
     function editReservation(reservationId) {
-      window.location.href = `editreservations.html?id=${reservationId}`;
+      window.location.href = `reservations.php?action=edit&reservation_number=${reservationId}`;
+
     }
   </script>
 </body>

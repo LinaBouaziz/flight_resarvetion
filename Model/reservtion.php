@@ -1,4 +1,5 @@
 <?php
+
 class Reservation {
     private $pdo;
 
@@ -6,11 +7,11 @@ class Reservation {
         $this->pdo = $pdo;
     }
 
-    // إضافة الحجز مع معالجة الأخطاء
-public function addReservation($data) {
-    try {
-        $stmt = $this->pdo->prepare("INSERT INTO reservation (reservation_date, status, class_name, client_id, flight_number, total_price) 
-                                     VALUES (:reservation_date, :status, :class_name, :client_id, :flight_number, :total_price)");
+    // إضافة حجز جديد، ترجع رقم الحجز الجديد
+    public function addReservation($data) {
+        $sql = "INSERT INTO reservation (reservation_date, status, class_name, client_id, flight_number, total_price)
+                VALUES (:reservation_date, :status, :class_name, :client_id, :flight_number, :total_price)";
+        $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
             ':reservation_date' => $data['reservation_date'],
             ':status' => $data['status'],
@@ -19,122 +20,103 @@ public function addReservation($data) {
             ':flight_number' => $data['flight_number'],
             ':total_price' => $data['total_price']
         ]);
-        return $this->pdo->lastInsertId(); // هذا يُعيد رقم الحجز المُولَّد
-    } catch (PDOException $e) {
-        error_log("Error in addReservation: " . $e->getMessage());
-        return false;
+        return $this->pdo->lastInsertId();
     }
-}
-    // إضافة المسافر مع معالجة الأخط
-public function addPassenger($data) {
-    try {
-        $this->pdo->beginTransaction();
 
-        // 1. توليد identity_number جديد
-        $sql = "SELECT identity_number FROM passenger ORDER BY identity_number DESC LIMIT 1";
-        $result = $this->pdo->query($sql);
-        $row = $result->fetch(PDO::FETCH_ASSOC);
+    // إضافة مسافر مرتبط بحجز معين
+    public function addPassenger($data) {
+        $sql = "INSERT INTO passenger (name, passport_number, nationality, reservation_number)
+                VALUES (:name, :passport_number, :nationality, :reservation_number)";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([
+            ':name' => $data['name'],
+            ':passport_number' => $data['passport_number'],
+            ':nationality' => $data['nationality'],
+            ':reservation_number' => $data['reservation_number']
+        ]);
+    }
 
-        if ($row) {
-            $lastId = $row['identity_number'];
-            $num = (int)substr($lastId, 1); // حذف الحرف P
-            $newNum = $num + 1;
-        } else {
-            $newNum = 1;
-        }
+    // إضافة معلومات دفع مرتبطة بالحجز
+    public function addPayment($data) {
+        $sql = "INSERT INTO payment (reservation_number, card_name, card_number, expiry_date, cvv, created_at)
+                VALUES (:reservation_number, :card_name, :card_number, :expiry_date, :cvv, :created_at)";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([
+            ':reservation_number' => $data['reservation_number'],
+            ':card_name' => $data['card_name'],
+            ':card_number' => $data['card_number'],
+            ':expiry_date' => $data['expiry_date'],
+            ':cvv' => $data['cvv'],
+            ':created_at' => $data['created_at']
+        ]);
+    }
 
-        $newIdentityNumber = 'P' . str_pad($newNum, 3, '0', STR_PAD_LEFT);
+    // جلب كل الحجوزات بترتيب تنازلي حسب تاريخ الحجز
+    public function getAllReservations() {
+        $sql = "SELECT * FROM reservation ORDER BY reservation_date DESC";
+        $stmt = $this->pdo->query($sql);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
-        // 2. إضافة المسافر
-        $stmt = $this->pdo->prepare("
-            INSERT INTO passenger (identity_number, first_name, last_name, email, phone)
-            VALUES (:identity_number, :first_name, :last_name, :email, :phone)
-        ");
-        $stmt->execute([
-            ':identity_number' => $newIdentityNumber,
-            ':first_name' => $data['first_name'],
-            ':last_name' => $data['last_name'],
-            ':email' => $data['email'],
-            ':phone' => $data['phone']
+    // تحديث حالة الحجز فقط
+    public function updateReservationStatus($reservationNumber, $status) {
+        $sql = "UPDATE reservation SET status = :status WHERE reservation_number = :reservation_number";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([
+            ':status' => $status,
+            ':reservation_number' => $reservationNumber
+        ]);
+    }
+
+    // تحديث معلومات عامة للحجز (حالة، درجة، السعر الإجمالي)
+    public function updateReservation($reservationNumber, $data) {
+        $sql = "UPDATE reservation SET status = :status, class_name = :class_name, total_price = :total_price
+                WHERE reservation_number = :reservation_number";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([
+            ':status' => $data['status'],
+            ':class_name' => $data['class_name'],
+            ':total_price' => $data['total_price'],
+            ':reservation_number' => $reservationNumber
+        ]);
+    }
+
+    // جلب حجز معين بواسطة رقم الحجز
+    public function getReservationById($reservationNumber) {
+        $sql = "SELECT * FROM reservation WHERE reservation_number = :reservation_number";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':reservation_number' => $reservationNumber]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    // تحديث بعض الحقول في الحجز، مع تحديث وقت الانطلاق في الرحلة المرتبطة (إن وجد)
+    public function updateReservationFields($reservationNumber, $status, $departureTime) {
+        $sql1 = "UPDATE reservation SET status = :status WHERE reservation_number = :reservation_number";
+        $stmt1 = $this->pdo->prepare($sql1);
+        $result1 = $stmt1->execute([
+            ':status' => $status,
+            ':reservation_number' => $reservationNumber
         ]);
 
-        // 3. ربط المسافر بالحجز
-       $stmt = $this->pdo->prepare("
-    INSERT INTO includes (reservation_number, passenger_id)
-    VALUES (:reservation_number, :passenger_id)
-");
-$stmt->execute([
-    ':reservation_number' => $data['reservation_number'], // ← هذا الآن int
-    ':passenger_id' => $newIdentityNumber
-]);
+        // تحديث وقت الانطلاق في جدول الرحلات المرتبطة بالحجز
+        $sql2 = "UPDATE flight SET departure_time = :departure_time WHERE flight_number = (
+                    SELECT flight_number FROM reservation WHERE reservation_number = :reservation_number
+                )";
+        $stmt2 = $this->pdo->prepare($sql2);
+        $result2 = $stmt2->execute([
+            ':departure_time' => $departureTime,
+            ':reservation_number' => $reservationNumber
+        ]);
 
-        $this->pdo->commit();
-        return true;
-
-    } catch (PDOException $e) {
-        $this->pdo->rollBack();
-        echo "خطأ في إضافة المسافر: " . $e->getMessage();
-        exit;
-        return false;
-    }
-}
-
-    // إضافة الدفع مع معالجة الأخطاء
-    public function addPayment($data) {
-        try {
-            $stmt = $this->pdo->prepare("INSERT INTO payment (reservation_number, card_name, card_number, expiry_date, cvv, created_at) 
-                                     VALUES (:reservation_number, :card_name, :card_number, :expiry_date, :cvv, :created_at)");
-            return $stmt->execute([
-                ':reservation_number' => $data['reservation_number'],
-                ':card_name' => $data['card_name'],
-                ':card_number' => $data['card_number'],
-                ':expiry_date' => $data['expiry_date'],
-                ':cvv' => $data['cvv'],
-                ':created_at' => $data['created_at']
-            ]);
-        } catch (PDOException $e) {
-            error_log("Error in addPayment: " . $e->getMessage());
-            return false;
-        }
+        return $result1 && $result2;
     }
 
-    // تحديث حالة الحجز
-    public function updateReservationStatus($reservationNumber, $status) {
-        try {
-            $stmt = $this->pdo->prepare("UPDATE reservation SET status = :status WHERE reservation_number = :reservation_number");
-            return $stmt->execute([
-                ':status' => $status,
-                ':reservation_number' => $reservationNumber
-            ]);
-        } catch (PDOException $e) {
-            error_log("Error in updateReservationStatus: " . $e->getMessage());
-            return false;
-        }
+    // حذف حجز معين بواسطة رقم الحجز
+    public function deleteReservation($reservationNumber) {
+        $sql = "DELETE FROM reservation WHERE reservation_number = :reservation_number";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([':reservation_number' => $reservationNumber]);
     }
-    // جلب جميع الحجوزات مع معلومات العميل والرحلة
-public function getAllReservations() {
-    try {
-        $stmt = $this->pdo->prepare("
-            SELECT 
-                r.reservation_number,
-                CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
-                r.flight_number,
-                r.reservation_date,
-                f.departure_date,
-                r.status
-            FROM reservation r
-            JOIN client c ON r.client_id = c.client_id
-            JOIN flight f ON r.flight_number = f.flight_number
-            ORDER BY r.reservation_date DESC
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Error in getAllReservations: " . $e->getMessage());
-        return [];
-    }
-}
-
 }
 
 

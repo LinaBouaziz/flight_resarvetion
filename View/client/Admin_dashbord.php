@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -147,7 +146,8 @@
       <h3>Manage Flights</h3>
       <p>View, update, and schedule new flights.</p>
     </a>
-    <a href="/admin/users" class="card">
+    <a href="manage-users.php" class="card">
+
       <h3>Manage Users</h3>
       <p>Control user access and view user activity.</p>
     </a>
@@ -156,14 +156,13 @@
   <p>Monitor and manage flight reservations.</p>
   </a>
 
-    <a href="/admin/settings" class="card">
-      <h3>Settings</h3>
-      <p>Update system preferences and account settings.</p>
+  <a href="settings.php" class="settings-btn">Settings</a>
+  <h3>Settings</h3>
+  <p>Update system preferences and account settings.</p> 
     </a>
+    
   </div>
 </main>
-
-
 
   <div class="footer">
     Nova Travels Admin Panel ‚Äî Version 1.0
